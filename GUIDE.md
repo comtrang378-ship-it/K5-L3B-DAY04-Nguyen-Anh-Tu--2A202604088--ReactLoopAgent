@@ -15,7 +15,7 @@ Toàn bộ các bước dưới đây thuộc bài lab. Giả định học viê
 | 195–225 phút | Bài 5: chạy eval lần 2 | So sánh điểm và lỗi với lần 1. |
 | 225–240 phút | Demo và thảo luận | Trình bày kết quả, trace và giới hạn. |
 
-Tổng: 240 phút, bao gồm 10 phút nghỉ. Eval gọi model thật cho cả agent và judge nên thời gian và chi phí có thể thay đổi. Mỗi case chạy độc lập; kết quả được ghi sau khi cả bộ hoàn tất.
+Tổng: 240 phút, bao gồm 10 phút nghỉ. Eval gọi model cho cả agent và judge nên thời gian và chi phí có thể thay đổi. Có thể dùng Ollama local thay API; xem [README.md](README.md#chạy-local-và-so-sánh-với-api). Mỗi case chạy độc lập; kết quả được ghi sau khi cả bộ hoàn tất.
 
 ## Khám phá tools
 
@@ -74,7 +74,7 @@ python3 evals/run_evals.py --output eval_before.json
 
 Bộ eval gồm **22 case E1–E6, A1–A8 và H1–H8**: điều tra nhiều provider, timeline, yêu cầu sai hoặc ngoài luồng, timeout, prompt injection, tìm kiếm giới hạn và nhiều bước tool call. H6 có thêm 40 mục nhiễu giả lập để kiểm tra agent khi thông tin dài. Các scenario giả lập chỉ áp dụng cho eval, không sửa snapshot gốc.
 
-Mỗi case được chấm 0–100 bằng **LLM judge + kiểm tra bằng code**. Mở `eval_before.json`, xem `summary`, `grade.reason`, `grade.improvement`, `grade.mechanical`, answer và trace. Điểm judge là ước lượng, có thể sai hoặc bị ảnh hưởng bởi model; đối chiếu với `expected` và evidence. `completed` chỉ nói agent đã dừng bình thường.
+Mỗi case được chấm 0–100 bằng **LLM judge + kiểm tra bằng code**. Mở `eval_before.json`, xem `summary`, `grade.reason`, `grade.improvement`, `grade.mechanical`, answer và trace. Điểm judge là ước lượng, có thể sai hoặc bị ảnh hưởng bởi model; đối chiếu với `expected` và evidence. `completed` chỉ nói agent đã dừng bình thường. Khi so sánh local với API, dùng cùng judge và chạy `python3 evals/compare_evals.py eval_local.json eval_api.json` để xem chênh lệch từng case.
 
 Nếu một case bị lỗi hệ thống hoặc judge không trả JSON hợp lệ, case là `unscored` và điểm tổng là `null`. Sửa vấn đề cấu hình và chạy lại, không coi case đó là 0 hoặc bỏ qua để báo điểm tổng. `partial_mean_0_100` chỉ là trung bình các case đã chấm, không phải điểm toàn bộ.
 

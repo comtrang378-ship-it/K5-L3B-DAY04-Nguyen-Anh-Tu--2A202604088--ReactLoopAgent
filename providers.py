@@ -1,14 +1,17 @@
-"""Bốn provider cùng một interface. Không chứa agent loop."""
+"""Provider adapters dùng chung interface. Không chứa agent loop."""
 import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 CONFIG = {
     'openai': ('OPENAI_API_KEY', 'https://api.openai.com/v1/chat/completions'),
     'gemini': ('GEMINI_API_KEY', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'),
     'openrouter': ('OPENROUTER_API_KEY', 'https://openrouter.ai/api/v1/chat/completions'),
     'anthropic': ('ANTHROPIC_API_KEY', 'https://api.anthropic.com/v1/messages'),
+    'ollama': (None, None),
+    'openai-compatible': ('OPENAI_COMPATIBLE_API_KEY', None),
 }
 
 
@@ -18,8 +21,50 @@ def post_json(url, headers, payload):
         with urllib.request.urlopen(req, timeout=60) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
-        # Do not print response bodies: they may contain account or request data.
-        raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
+        try:
+            body = json.loads(exc.read().decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            body = {}
+        error = body.get('error') if isinstance(body, dict) else None
+        details_source = error if isinstance(error, dict) else body
+        if not isinstance(details_source, dict):
+            details_source = {}
+
+        secrets = []
+        for name, value in headers.items():
+            if name.lower() in ('authorization', 'x-api-key') and isinstance(value, str):
+                secrets.append(value)
+                if name.lower() == 'authorization' and ' ' in value:
+                    secrets.append(value.split(' ', 1)[1])
+
+        details = []
+        for field in ('status', 'type', 'code'):
+            value = details_source.get(field)
+            if isinstance(value, (str, int, float)) and value != '':
+                text = ' '.join(str(value).split())
+                for secret in secrets:
+                    text = text.replace(secret, '[REDACTED]')
+                details.append(f'{field}={text[:40]}')
+        message = details_source.get('message')
+        if not isinstance(message, str) and isinstance(error, str):
+            message = error
+        if isinstance(message, str) and message:
+            text = ' '.join(message.split())
+            for secret in secrets:
+                text = text.replace(secret, '[REDACTED]')
+            details.append(f'message={text[:100]}')
+        retry_after = exc.headers.get('Retry-After') if exc.headers else None
+        if retry_after:
+            details.append(f'retry_after={str(retry_after)[:20]}')
+        if not details:
+            fields = ','.join(str(field) for field in body.keys()) if isinstance(body, dict) else type(body).__name__
+            details.append(f'response_shape={fields[:60]}')
+
+        diagnostic = f"; {'; '.join(details)[:150]}" if details else ''
+        host = urlsplit(url).hostname or 'unknown'
+        raise RuntimeError(
+            f'Provider {host} trả HTTP {exc.code}{diagnostic}; kiểm tra model, key và quota.'
+        ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
 
@@ -36,10 +81,24 @@ class Provider:
         if not model:
             raise ValueError('Cần đặt MODEL là model có hỗ trợ tool calling.')
         self.name, self.model = name, model
-        key_name, self.url = CONFIG[name]
-        self.key = os.getenv(key_name)
-        if not self.key:
-            raise ValueError(f'Thiếu {key_name}; xem README.md.')
+        key_name, endpoint = CONFIG[name]
+        if name == 'ollama':
+            base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434/v1')
+            self.url = f'{base_url.rstrip("/")}/chat/completions'
+            self.key = None
+        elif name == 'openai-compatible':
+            base_url = os.getenv('OPENAI_COMPATIBLE_BASE_URL')
+            if not base_url:
+                raise ValueError('Thiếu OPENAI_COMPATIBLE_BASE_URL; xem README.md.')
+            self.url = base_url.rstrip('/')
+            if not self.url.endswith('/chat/completions'):
+                self.url += '/chat/completions'
+            self.key = os.getenv(key_name)
+        else:
+            self.url = endpoint
+            self.key = os.getenv(key_name)
+            if not self.key:
+                raise ValueError(f'Thiếu {key_name}; xem README.md.')
 
     def complete(self, messages, schemas):
         if self.name == 'anthropic':
@@ -47,7 +106,8 @@ class Provider:
         payload = {'model': self.model, 'messages': messages}
         if schemas:
             payload['tools'] = schemas
-        data = post_json(self.url, {'Authorization': f'Bearer {self.key}'}, payload)
+        headers = {'Authorization': f'Bearer {self.key}'} if self.key else {}
+        data = post_json(self.url, headers, payload)
         choice = data['choices'][0]
         message = choice['message']
         calls = [{'id': c['id'], 'name': c['function']['name'], 'arguments': c['function']['arguments']} for c in message.get('tool_calls', [])]

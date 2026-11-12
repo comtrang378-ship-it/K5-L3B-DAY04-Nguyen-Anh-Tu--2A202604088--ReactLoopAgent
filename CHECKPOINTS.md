@@ -15,8 +15,8 @@
 
 ## CP1 · Setup và khám phá tools
 
-- **Cần làm:** fork repo đề, đổi tên theo mẫu, clone về máy, đặt `PROVIDER`, `MODEL` và API key của một provider; chạy thử 2 tool trong [GUIDE.md](GUIDE.md).
-- **Sản phẩm:** repo riêng đúng tên, máy đã có key chạy được.
+- **Cần làm:** fork repo đề, đổi tên theo mẫu, clone về máy, đặt `PROVIDER` và `MODEL` cho Ollama local hoặc một API provider; chạy thử 2 tool trong [GUIDE.md](GUIDE.md).
+- **Sản phẩm:** repo riêng đúng tên, model provider chạy được.
 - **Cần hiểu:** hai tool trả gì, vì sao tìm không thấy không chứng minh incident không tồn tại.
 - **Tự kiểm tra:** lệnh `get_status` in ra JSON; push thử được vào repo của bạn.
 

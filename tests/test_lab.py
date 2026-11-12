@@ -1,13 +1,15 @@
 """Tests offline; FakeProvider là test double, không đánh giá năng lực model."""
+import io
 import json
 import sys
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agent import run_agent
 from status_tools import StatusTools
-from providers import Provider
+from providers import Provider, post_json
 
 
 def tool_call(call_id, name, arguments):
@@ -80,6 +82,32 @@ class LoopTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.TestCase):
+    def test_http_error_includes_safe_provider_diagnostics(self):
+        secret = 'test-secret'
+        body = json.dumps({
+            'error': {
+                'status': 'RESOURCE_EXHAUSTED',
+                'message': f'Quota exceeded for key {secret}',
+            },
+        }).encode()
+        error = urllib.error.HTTPError(
+            'https://example.invalid', 429, 'rate limited', {},
+            io.BytesIO(body),
+        )
+        with patch('providers.urllib.request.urlopen', side_effect=error):
+            with self.assertRaises(RuntimeError) as raised:
+                post_json(
+                    'https://example.invalid',
+                    {'Authorization': f'Bearer {secret}'},
+                    {},
+                )
+
+        message = str(raised.exception)
+        self.assertIn('example.invalid', message)
+        self.assertIn('RESOURCE_EXHAUSTED', message)
+        self.assertIn('Quota exceeded', message)
+        self.assertNotIn(secret, message)
+
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test'})
     @patch('providers.post_json')
     def test_anthropic_groups_results(self, post):
@@ -125,3 +153,23 @@ class FullTrajectoryTests(unittest.TestCase):
                 self.assertEqual(result['finish'], 'stop')
                 self.assertEqual(post.call_args.args[2]['model'], 'test-model')
                 self.assertIn('chat/completions', post.call_args.args[0])
+
+    @patch.dict('os.environ', {'OLLAMA_BASE_URL': 'http://localhost:11434/v1'})
+    @patch('providers.post_json')
+    def test_ollama_uses_local_chat_completions_without_api_key(self, post):
+        post.return_value = {'choices':[{'message':{'role':'assistant','content':'ok'},'finish_reason':'stop'}], 'usage':{}}
+        result = Provider('ollama', 'qwen2.5:3b').complete([{'role':'user','content':'hello'}], [])
+        self.assertEqual(result['finish'], 'stop')
+        self.assertEqual(post.call_args.args[0], 'http://localhost:11434/v1/chat/completions')
+        self.assertEqual(post.call_args.args[1], {})
+
+    @patch.dict('os.environ', {
+        'OPENAI_COMPATIBLE_BASE_URL': 'https://api.example.test/v1',
+        'OPENAI_COMPATIBLE_API_KEY': 'test-key',
+    })
+    @patch('providers.post_json')
+    def test_openai_compatible_provider_uses_configured_endpoint(self, post):
+        post.return_value = {'choices':[{'message':{'role':'assistant','content':'ok'},'finish_reason':'stop'}], 'usage':{}}
+        Provider('openai-compatible', 'test-model').complete([{'role':'user','content':'hello'}], [])
+        self.assertEqual(post.call_args.args[0], 'https://api.example.test/v1/chat/completions')
+        self.assertEqual(post.call_args.args[1], {'Authorization': 'Bearer test-key'})
